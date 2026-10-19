@@ -1,0 +1,50 @@
+name: Syncotta CI report
+description: Tells Syncotta for Jira which issues a container image belongs to, so its Argo CD deployments link to them.
+author: Syncotta
+branding:
+  icon: link
+  color: blue
+
+inputs:
+  events-url:
+    description: Events URL from the Syncotta admin page in Jira (the one ending in /events). Keep it in a secret.
+    required: true
+  instance-id:
+    description: Argo CD instance id from the admin page.
+    required: true
+  hmac-key:
+    description: HMAC key of the instance (admin page, "New HMAC key"). Keep it in a secret.
+    required: true
+  image:
+    description: Image reference that was pushed. Prefer the digest form (registry/repo:tag@sha256:...) for exact links.
+    required: true
+  tags:
+    description: Further tags of the same image, comma or newline separated. Mutable tags such as latest are ignored.
+    required: false
+    default: ""
+  issue-keys:
+    description: Issue keys to use instead of discovering them (comma or newline separated).
+    required: false
+    default: ""
+  repository:
+    description: Source repository recorded with the image. Defaults to <server host>/<owner>/<repo>.
+    required: false
+    default: ""
+  commit:
+    description: Commit SHA recorded with the image. Defaults to GITHUB_SHA.
+    required: false
+    default: ""
+  fail-on-error:
+    description: Fail the step when Syncotta cannot be reached or rejects the request. Default false (warning only).
+    required: false
+    default: "false"
+
+outputs:
+  issue-keys:
+    description: Issue keys sent, comma separated (empty when none were found).
+  status:
+    description: "Result: sent, skipped (no issue keys) or failed."
+
+runs:
+  using: node24
+  main: dist/main.js
