@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in Syncotta for Jira, the Helm chart, the gate client or this action does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This tracker is public. **Never paste tokens, HMAC keys, web trigger URLs or your Jira site URL.**
+        Email contact@syncotta.com for anything private, and security@syncotta.com for vulnerabilities.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Jira app (deployments, admin page)
+        - Change gate (PreSync Job, gate client)
+        - Helm chart
+        - GitHub Action
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Syncotta app version (Jira > Apps > Manage apps), Helm chart version, Argo CD version, action tag.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: For the gate, the log of the gate Job (`kubectl logs job/...`). Remove secrets first.
+      render: text

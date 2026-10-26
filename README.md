@@ -4,8 +4,8 @@ Tells Syncotta for Jira which issues a container image belongs to. When Argo CD 
 deployment shows up on those Jira work items, also for multi-source apps where Argo CD cannot read the commit
 message.
 
-The action sends `{ image, tags, repository, commit, issueKeys }` to the Syncotta `/ci` web trigger, signed with
-the instance's HMAC key. It has no dependencies besides Node.js and `git`.
+The action sends `{ image, tags, repository, commit, issueKeys, pullRequest }` to the Syncotta `/ci` web trigger,
+signed with the instance's HMAC key. It has no dependencies besides Node.js and `git`.
 
 ## Setup
 
@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read # audit trail: which pull request shipped the image and how many approvals it had
       packages: write
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +37,7 @@ jobs:
         with:
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
-      - uses: Syncotta/syncotta-action@v0 # or pin a release tag such as v0.1.0, or a commit SHA
+      - uses: Syncotta/syncotta-action@v0 # or pin a release tag such as v0.2.0, or a commit SHA
         with:
           events-url: ${{ secrets.SYNCOTTA_EVENTS_URL }}
           instance-id: ${{ vars.SYNCOTTA_INSTANCE_ID }}
@@ -56,6 +57,7 @@ jobs:
 | `issue-keys` | no | | Use these keys instead of discovering them |
 | `repository` | no | `github.com/<owner>/<repo>` | Source repository stored with the image |
 | `commit` | no | `GITHUB_SHA` | Commit stored with the image |
+| `github-token` | no | `${{ github.token }}` | Token to look up the pull request for the audit trail (needs `pull-requests: read` and `contents: read`). Empty skips the lookup |
 | `fail-on-error` | no | `false` | `true` fails the step when Syncotta cannot be reached or refuses the request |
 
 Outputs: `issue-keys` (comma separated) and `status` (`sent`, `skipped` when no keys were found, `failed`).
@@ -93,3 +95,32 @@ npm ci
 npm run typecheck && npm test && npm run lint
 npm run build   # writes dist/, which is committed; CI checks it is up to date
 ```
+
+## Pull request audit trail
+
+For the audit trail (which pull request shipped an image, how many approvals it had and when, when it was merged)
+the action looks up the pull request with `github-token` and adds `pullRequest` to the request:
+
+```json
+"pullRequest": { "number": 12, "url": "https://github.com/acme/pay/pull/12", "mergedAt": "2026-10-19T10:00:00Z",
+                 "approvals": 2, "approvedAt": "2026-10-19T09:30:00Z" }
+```
+
+- `push`, tag and other builds: the merged pull request whose merge commit is the built commit, else the first
+  merged pull request that contains it (`GET /repos/{repo}/commits/{sha}/pulls`). None found: no `pullRequest`.
+- `pull_request`, `pull_request_target`: the event's pull request (`mergedAt` is usually `null`).
+- `approvals` counts reviewers whose latest review is an approval, as GitHub does: a later "changes requested"
+  replaces an approval, a dismissed approval no longer counts, comments change nothing. `approvedAt` is the time of
+  the newest of those approvals. At most 300 reviews are read.
+- No reviewer logins, author names or titles are sent or printed; logins are only used in memory to count
+  distinct reviewers.
+- The workflow needs `permissions: pull-requests: read` (and `contents: read`). Without them, or on rate limits and
+  network errors, the action warns once and sends the rest without `pullRequest`; the build never fails for this,
+  even with `fail-on-error: true`. On GitHub Enterprise Server the API URL comes from `GITHUB_API_URL`.
+
+## Issues and support
+
+The [issues](https://github.com/Syncotta/syncotta-action/issues) of this repository are the public tracker for all of
+Syncotta: the Jira app, the Helm chart, the gate client and this action. Never post tokens, HMAC keys, web trigger URLs
+or your Jira site URL. Private support: contact@syncotta.com ([support terms](https://syncotta.com/support/));
+vulnerabilities: security@syncotta.com ([security page](https://syncotta.com/security/#vulnerabilities)).

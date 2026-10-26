@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://syncotta.com/security/#vulnerabilities
+    about: Do not open a public issue. Email security@syncotta.com as described on the security page.
+  - name: Private support (site URL, logs you do not want public)
+    url: https://syncotta.com/support/
+    about: Email contact@syncotta.com. Support terms and response targets are on the support page.
+  - name: Documentation
+    url: https://syncotta.com/docs/
+    about: Setup guides, troubleshooting and the Helm values reference.

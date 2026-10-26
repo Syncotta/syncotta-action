@@ -29,6 +29,7 @@ function setup(inputs: Record<string, string>, over: Partial<RunDeps> = {}, resu
     readEvent: () => ({ head_commit: { message: "PAY-1 fix" } }),
     git: () => Promise.resolve(null),
     post: (r) => (sent.push(r), Promise.resolve(result)),
+    fetch: () => Promise.reject(new Error("fetch not expected")),
     ...over,
   };
   const output = (name: string) => {
@@ -118,6 +119,87 @@ describe("run", () => {
     const { deps, output } = setup({}, {}, { ok: false, status: null, attempts: 3, reason: "network error (TypeError)" });
     await expect(run(deps)).resolves.toBe(0);
     expect(output("status")).toBe("failed");
+  });
+});
+
+describe("pull request", () => {
+  const TOKEN = "ghs_tokenvalue";
+  const PR_URL = "https://github.com/acme/payments/pull/12";
+  const github = (status: number, pulls: unknown, reviews: unknown = []) =>
+    ((input: string | URL | Request) =>
+      Promise.resolve(
+        new Response(JSON.stringify((input instanceof Request ? input.url : input.toString()).includes("/reviews") ? reviews : pulls), { status }),
+      )) as typeof fetch;
+  const merged = { number: 12, html_url: PR_URL, merged_at: "2026-10-19T10:00:00Z", merge_commit_sha: SHA };
+  const approval = (id: number, state: string, at: string) => ({ user: { id, login: `reviewer${id}` }, state, submitted_at: at });
+
+  it("adds pullRequest to the body and logs the approval count", async () => {
+    const reviews = [approval(1, "APPROVED", "2026-10-19T09:00:00Z"), approval(2, "APPROVED", "2026-10-19T09:30:00Z")];
+    const { deps, sent, lines, output } = setup({ "github-token": TOKEN }, { fetch: github(200, [merged], reviews) });
+    await expect(run(deps)).resolves.toBe(0);
+    const body = JSON.parse(sent[0]!.body) as Record<string, unknown>;
+    expect(body.pullRequest).toEqual({ number: 12, url: PR_URL, mergedAt: "2026-10-19T10:00:00Z", approvals: 2, approvedAt: "2026-10-19T09:30:00Z" });
+    expect(body.issueKeys).toEqual(["PAY-2", "PAY-1"]);
+    expect(output("status")).toBe("sent");
+    const log = lines.join("");
+    expect(log).toContain("Pull request #12: 2 approval(s)");
+    expect(log).toContain(`::add-mask::${TOKEN}`);
+    expect(log.replace(`::add-mask::${TOKEN}`, "")).not.toContain(TOKEN);
+    expect(log).not.toContain("reviewer");
+    expect(sent[0]!.body).not.toContain("reviewer");
+  });
+
+  it.each([
+    ["403", github(403, {})],
+    ["404", github(404, {})],
+    ["rate limit", github(429, {})],
+    ["network", () => Promise.reject(new TypeError("fetch failed"))],
+  ])("%s warns once and sends without pullRequest", async (_name, fetchFn) => {
+    const { deps, sent, lines, output } = setup({ "github-token": TOKEN }, { fetch: fetchFn });
+    await expect(run(deps)).resolves.toBe(0);
+    expect(JSON.parse(sent[0]!.body)).not.toHaveProperty("pullRequest");
+    expect(output("status")).toBe("sent");
+    const warnings = lines.filter((l) => l.startsWith("::warning::"));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("pull-requests: read");
+    expect(lines.join("").replace(`::add-mask::${TOKEN}`, "")).not.toContain(TOKEN);
+  });
+
+  it("does not fail the step on a lookup error even with fail-on-error", async () => {
+    const { deps, sent } = setup({ "github-token": TOKEN, "fail-on-error": "true" }, { fetch: github(403, {}) });
+    await expect(run(deps)).resolves.toBe(0);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("sends without pullRequest when the commit has no merged PR", async () => {
+    const { deps, sent, lines } = setup({ "github-token": TOKEN }, { fetch: github(200, []) });
+    await run(deps);
+    expect(JSON.parse(sent[0]!.body)).not.toHaveProperty("pullRequest");
+    expect(lines.some((l) => l.startsWith("::warning::"))).toBe(false);
+  });
+
+  it("uses the event's PR on pull_request events", async () => {
+    const event = { pull_request: { number: 12, html_url: PR_URL, merged_at: null, title: "PAY-3 x", head: { ref: "f" } } };
+    const { deps, sent } = setup(
+      { "github-token": TOKEN },
+      { readEvent: () => event, fetch: github(200, null, [approval(1, "APPROVED", "2026-10-19T09:00:00Z")]) },
+    );
+    deps.env.GITHUB_EVENT_NAME = "pull_request";
+    await run(deps);
+    expect(JSON.parse(sent[0]!.body)).toMatchObject({ issueKeys: ["PAY-3"], pullRequest: { number: 12, mergedAt: null, approvals: 1 } });
+  });
+
+  it("skips the lookup when no issue keys are found", async () => {
+    const { deps, sent } = setup({ "github-token": TOKEN }, { readEvent: () => ({}), env: { GITHUB_REF: "refs/heads/main" } });
+    await expect(run(deps)).resolves.toBe(0);
+    expect(sent).toEqual([]);
+  });
+
+  it("skips the lookup with an empty github-token", async () => {
+    const { deps, sent, lines } = setup({});
+    await run(deps);
+    expect(JSON.parse(sent[0]!.body)).not.toHaveProperty("pullRequest");
+    expect(lines.join("")).toContain("No github-token");
   });
 });
 

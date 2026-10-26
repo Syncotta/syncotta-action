@@ -1,4 +1,5 @@
 import { discoverTexts } from "./discover.js";
+import { findPullRequest } from "./pullRequest.js";
 import { extractIssueKeys, isIssueKey, MAX_ISSUE_KEYS, splitList } from "./issueKeys.js";
 class InputError extends Error {
 }
@@ -37,8 +38,10 @@ export async function run(deps) {
     const failOnError = wf.input("fail-on-error").toLowerCase() === "true";
     const hmacKey = wf.input("hmac-key");
     const eventsUrl = wf.input("events-url");
+    const githubToken = wf.input("github-token");
     wf.mask(hmacKey);
     wf.mask(eventsUrl);
+    wf.mask(githubToken);
     const fail = (message) => {
         wf.setOutput("status", "failed");
         if (failOnError) {
@@ -49,6 +52,8 @@ export async function run(deps) {
         return 0;
     };
     let request;
+    let body;
+    let commit;
     let keys;
     try {
         const instanceId = wf.input("instance-id");
@@ -60,7 +65,7 @@ export async function run(deps) {
         if (image === "")
             throw new InputError("image is required");
         const url = ciUrl(eventsUrl);
-        const commit = wf.input("commit") || env.GITHUB_SHA || "";
+        commit = wf.input("commit") || env.GITHUB_SHA || "";
         if (commit !== "" && !COMMIT.test(commit))
             throw new InputError("commit must be a hex SHA");
         const given = splitList(wf.input("issue-keys"));
@@ -86,18 +91,14 @@ export async function run(deps) {
         if (!image.includes("@sha256:")) {
             wf.notice("image has no digest: Jira links then rely on the tag pointing to this build. Pass the digest for exact links.");
         }
-        request = {
-            url,
-            instanceId,
-            hmacKey,
-            body: JSON.stringify({
-                schema: 1,
-                image,
-                tags: splitList(wf.input("tags")),
-                repository: wf.input("repository") || defaultRepository(env),
-                commit: commit === "" ? null : commit,
-                issueKeys: keys,
-            }),
+        request = { url, instanceId, hmacKey };
+        body = {
+            schema: 1,
+            image,
+            tags: splitList(wf.input("tags")),
+            repository: wf.input("repository") || defaultRepository(env),
+            commit: commit === "" ? null : commit,
+            issueKeys: keys,
         };
     }
     catch (err) {
@@ -111,7 +112,32 @@ export async function run(deps) {
         wf.info("No issue keys found: nothing sent to Syncotta.");
         return 0;
     }
-    const result = await deps.post(request);
+    if (githubToken === "") {
+        wf.info("No github-token: pull request not looked up.");
+    }
+    else {
+        const found = await findPullRequest({
+            eventName: env.GITHUB_EVENT_NAME ?? "",
+            event: deps.readEvent(),
+            sha: commit,
+            repository: env.GITHUB_REPOSITORY ?? "",
+            apiUrl: env.GITHUB_API_URL ?? "",
+            token: githubToken,
+            fetch: deps.fetch,
+        });
+        if (!found.ok) {
+            wf.warning(`Syncotta: pull request not looked up: ${found.reason}. The workflow needs "permissions: pull-requests: read" ` +
+                "(and contents: read) for the audit trail; the image is sent without it.");
+        }
+        else if (found.pullRequest === null) {
+            wf.info("No merged pull request found for this commit.");
+        }
+        else {
+            body.pullRequest = found.pullRequest;
+            wf.info(`Pull request #${found.pullRequest.number}: ${found.pullRequest.approvals} approval(s)`);
+        }
+    }
+    const result = await deps.post({ ...request, body: JSON.stringify(body) });
     if (!result.ok)
         return fail(`Syncotta: ${result.reason} after ${result.attempts} attempt(s)`);
     wf.setOutput("status", "sent");

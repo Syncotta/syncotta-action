@@ -34,6 +34,12 @@ inputs:
     description: Commit SHA recorded with the image. Defaults to GITHUB_SHA.
     required: false
     default: ""
+  github-token:
+    description: >-
+      Token to read the pull request behind the commit (number, link, merge time, approval count) for the audit
+      trail. The workflow needs "permissions: pull-requests: read" (and contents: read). Empty skips the lookup.
+    required: false
+    default: ${{ github.token }}
   fail-on-error:
     description: Fail the step when Syncotta cannot be reached or rejects the request. Default false (warning only).
     required: false

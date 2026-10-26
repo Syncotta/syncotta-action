@@ -31,7 +31,7 @@ const git = (args: string[]): Promise<string | null> =>
   });
 
 try {
-  process.exitCode = await run({ wf, env, readEvent, git, post: (request) => postCi(request) });
+  process.exitCode = await run({ wf, env, readEvent, git, post: (request) => postCi(request), fetch: (input, init) => fetch(input, init) });
 } catch (err) {
   wf.error(`Syncotta: unexpected error (${err instanceof Error ? err.name : "unknown"})`);
   process.exitCode = env["INPUT_FAIL-ON-ERROR"]?.trim().toLowerCase() === "true" ? 1 : 0;

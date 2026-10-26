@@ -26,7 +26,7 @@ const git = (args) => new Promise((resolve) => {
     execFile("git", args, { maxBuffer: 16 * 1024 * 1024, cwd: env.GITHUB_WORKSPACE }, (err, stdout) => resolve(err ? null : stdout));
 });
 try {
-    process.exitCode = await run({ wf, env, readEvent, git, post: (request) => postCi(request) });
+    process.exitCode = await run({ wf, env, readEvent, git, post: (request) => postCi(request), fetch: (input, init) => fetch(input, init) });
 }
 catch (err) {
     wf.error(`Syncotta: unexpected error (${err instanceof Error ? err.name : "unknown"})`);
